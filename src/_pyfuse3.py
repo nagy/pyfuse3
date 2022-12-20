@@ -29,7 +29,7 @@ else:
     # Will be injected by pyfuse3 extension module
     FUSEError = None
 
-__all__ = ['Operations', 'async_wrapper']
+__all__ = ['Operations','Context', 'async_wrapper']
 
 log = logging.getLogger(__name__)
 
@@ -712,3 +712,21 @@ class Operations:
         '''
 
         raise FUSEError(errno.ENOSYS)
+
+    def as_context(self, mountpoint, options, asyncio=False):
+        from pyfuse3 import init, close
+        from pyfuse3_asyncio import enable, disable
+
+        class Context:
+            def __enter__(ctxself):
+                if asyncio:
+                    enable()
+                init(self, mountpoint, options)
+                return self
+
+            def __exit__(ctxself, type, value, traceback):
+                close()
+                if asyncio:
+                    disable()
+
+        return Context()

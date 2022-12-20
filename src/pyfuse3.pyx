@@ -717,7 +717,7 @@ def init(ops, mountpoint, options=default_options):
     *ops* has to be an instance of the `Operations` class (or another
     class defining the same methods).
 
-    *args* has to be a set of strings. `default_options` provides some
+    *options* has to be a set of strings. `default_options` provides some
     reasonable defaults. It is recommended to use these options as a basis and
     add or remove options as necessary. For example::
 

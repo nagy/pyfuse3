@@ -10,6 +10,14 @@ This file is part of pyfuse3. This work may be distributed under
 the terms of the GNU LGPL.
 '''
 
+_exception_errno_map = {
+    PermissionError: errno.EACCES,
+    IsADirectoryError: errno.EISDIR,
+    NotADirectoryError: errno.ENOTDIR,
+    FileNotFoundError: errno.ENOENT,
+    FileExistsError: errno.EEXIST,
+}
+
 @cython.freelist(60)
 cdef class _Container:
     """For internal use by pyfuse3 only."""
@@ -62,8 +70,10 @@ async def fuse_lookup_async (_Container c, name):
 
     ctx = get_request_context(c.req)
     try:
-        entry = <EntryAttributes?> await operations.lookup(
-            c.parent, name, ctx)
+        result = await operations.lookup(c.parent, name, ctx)
+        if not result:
+            raise FUSEError(errno.ENOENT)
+        entry = <EntryAttributes?> result
     except FUSEError as e:
         ret = fuse_reply_err(c.req, e.errno)
     else:
@@ -101,9 +111,12 @@ async def fuse_getattr_async (_Container c):
 
     ctx = get_request_context(c.req)
     try:
-        entry = <EntryAttributes?> await operations.getattr(c.ino, ctx)
-    except FUSEError as e:
-        ret = fuse_reply_err(c.req, e.errno)
+        result = await operations.getattr(c.ino, ctx)
+        if not result:
+            raise FUSEError(errno.ENOENT)
+        entry = <EntryAttributes?> result
+    except (FUSEError, OSError) as e:
+        ret = fuse_reply_err(c.req, e.errno or _exception_errno_map[type(e)])
     else:
         ret = fuse_reply_attr(c.req, entry.attr, entry.fuse_param.attr_timeout)
 
@@ -186,11 +199,13 @@ async def fuse_readlink_async (_Container c):
     cdef char* name
     ctx = get_request_context(c.req)
     try:
-        target = await operations.readlink(c.ino, ctx)
+        result = await operations.readlink(c.ino, ctx)
+        if not result:
+            raise FUSEError(errno.ENOENT)
     except FUSEError as e:
         ret = fuse_reply_err(c.req, e.errno)
     else:
-        name = PyBytes_AsString(target)
+        name = PyBytes_AsString(result)
         ret = fuse_reply_readlink(c.req, name)
 
     if ret != 0:
@@ -242,8 +257,8 @@ async def fuse_mkdir_async (_Container c, name):
     try:
         entry = <EntryAttributes?> await operations.mkdir(
             c.parent, name, c.mode, ctx)
-    except FUSEError as e:
-        ret = fuse_reply_err(c.req, e.errno)
+    except (FUSEError, OSError) as e:
+        ret = fuse_reply_err(c.req, e.errno or _exception_errno_map[type(e)])
     else:
         ret = fuse_reply_entry(c.req, &entry.fuse_param)
 
@@ -386,8 +401,8 @@ async def fuse_open_async (_Container c):
 
     try:
         fi = <FileInfo?> await operations.open(c.ino, c.fi.flags, ctx)
-    except FUSEError as e:
-        ret = fuse_reply_err(c.req, e.errno)
+    except (FUSEError, OSError) as e:
+        ret = fuse_reply_err(c.req, e.errno or _exception_errno_map[type(e)])
     else:
         fi._copy_to_fuse(&c.fi)
         ret = fuse_reply_open(c.req, &c.fi)
@@ -548,7 +563,10 @@ async def fuse_opendir_async (_Container c):
 
     ctx = get_request_context(c.req)
     try:
-        c.fi.fh = await operations.opendir(c.ino, ctx)
+        result = await operations.opendir(c.ino, ctx)
+        if not result:
+            raise FUSEError(errno.ENOENT)
+        c.fi.fh = result
     except FUSEError as e:
         ret = fuse_reply_err(c.req, e.errno)
     else:
